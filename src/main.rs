@@ -4,7 +4,6 @@ extern crate newline_converter;
 
 use ini::Ini;
 use keepass::{Database, DatabaseKey};
-use keepass::db::NodeRef;
 use newline_converter::dos2unix;
 
 use std::env;
@@ -79,8 +78,10 @@ fn main() -> std::io::Result<()> {
         process::exit(2);
 
     }
-    let entry_path = secret_vec[0].split("/").collect::<Vec<&str>>();
-    if let Some(NodeRef::Entry(e)) = db.root.get(&entry_path) {
+    let (group_path, entry_name) = secret_vec[0].rsplit_once('/').unwrap_or(("", secret_vec[0]));
+    let path_segments: Vec<&str> = group_path.split('/').filter(|s| !s.is_empty()).collect();
+    let entry = db.root.group_by_path(&path_segments).and_then(|g| g.entry_by_name(entry_name));
+    if let Some(e) = entry {
         // Check if the field exists
         if let Some(field_value) = e.get(field) {
             out_handle.write(dos2unix(field_value).as_bytes()).unwrap();

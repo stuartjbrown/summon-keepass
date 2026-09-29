@@ -21,14 +21,19 @@ on:
         type: string
 
 jobs:
-  release:
+  version-bump:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    outputs:
+      version: ${{ steps.get-version.outputs.version }}
+      tag: ${{ steps.get-tag.outputs.tag }}
+      is_prerelease: ${{ steps.release-type.outputs.is_prerelease }}
+      changelog: ${{ steps.changelog.outputs.changelog }}
 
     steps:
     - name: Checkout repository
-      uses: actions/checkout@v2
+      uses: actions/checkout@v4
       with:
         fetch-depth: 0
         token: ${{ secrets.GITHUB_TOKEN }}
@@ -88,30 +93,19 @@ jobs:
         echo "🚀 Executing release..."
         cargo release ${{ steps.release-cmd.outputs.command }} --execute --no-confirm
 
-    - name: Get version and package info
+    - name: Get version info
       id: get-version
       run: |
         VERSION=$(grep '^version = ' Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
-        PACKAGE_NAME=$(cargo metadata --no-deps | jq -r .packages[0].name)
         echo "version=$VERSION" >> $GITHUB_OUTPUT
-        echo "package_name=$PACKAGE_NAME" >> $GITHUB_OUTPUT
-        echo "target_file=${PACKAGE_NAME}-linux-amd64.tar.gz" >> $GITHUB_OUTPUT
         echo "📌 Version: $VERSION"
-        echo "📦 Package: $PACKAGE_NAME"
 
-    - name: Build binary
+    - name: Get tag name
+      id: get-tag
       run: |
-        echo "🔨 Building release binary..."
-        cargo build --verbose --release
-        strip target/release/${{ steps.get-version.outputs.package_name }}
-        mv target/release/${{ steps.get-version.outputs.package_name }} ${{ steps.get-version.outputs.package_name }}
-
-    - name: Package binary
-      uses: thedoctor0/zip-release@master
-      with:
-        filename: ${{ steps.get-version.outputs.target_file }}
-        path: ${{ steps.get-version.outputs.package_name }}
-        type: tar
+        TAG=$(git describe --tags --exact-match HEAD)
+        echo "tag=$TAG" >> $GITHUB_OUTPUT
+        echo "🏷️ Tag: $TAG"
 
     - name: Determine release type
       id: release-type
@@ -128,35 +122,41 @@ jobs:
 
     - name: Extract changelog
       id: changelog
-      run: |
-        VERSION="${{ steps.get-version.outputs.version }}"
-        # Extract the section for this version from CHANGELOG.md
-        awk "BEGIN{p=0} /^## \[${VERSION}\]/{p=1; next} /^## \[/ && p{exit} p" CHANGELOG.md > /tmp/changelog.txt
-
-        # If empty (pre-releases won't have a section), fall back to [Unreleased]
-        if [ ! -s /tmp/changelog.txt ]; then
-          echo "No section found for ${VERSION}, extracting [Unreleased] content..."
-          awk "BEGIN{p=0} /^## \[Unreleased\]/{p=1; next} /^## \[/ && p{exit} p" CHANGELOG.md > /tmp/changelog.txt
-        fi
-
-        # If still empty, use a default message
-        if [ ! -s /tmp/changelog.txt ]; then
-          echo "Release ${VERSION}" > /tmp/changelog.txt
-        fi
-
-        echo "changelog_file=/tmp/changelog.txt" >> $GITHUB_OUTPUT
+      uses: ./.github/actions/extract-changelog
+      with:
+        version: ${{ steps.get-version.outputs.version }}
 
     - name: Push changes
       run: |
         echo "⬆️ Pushing commit and tags..."
         git push --follow-tags
 
-    - name: Create GitHub Release
-      uses: softprops/action-gh-release@v1
+  build:
+    needs: version-bump
+    uses: ./.github/workflows/build-release-binaries.yml
+    with:
+      ref: ${{ needs.version-bump.outputs.tag }}
+
+  publish:
+    needs: [version-bump, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+    - name: Download artifacts
+      uses: actions/download-artifact@v4
       with:
-        tag_name: v${{ steps.get-version.outputs.version }}
-        prerelease: ${{ steps.release-type.outputs.is_prerelease }}
-        files: ${{ steps.get-version.outputs.target_file }}
-        body_path: ${{ steps.changelog.outputs.changelog_file }}
+        pattern: release-binaries-*
+        path: dist
+        merge-multiple: true
+
+    - name: Create GitHub Release
+      uses: softprops/action-gh-release@v2
+      with:
+        tag_name: ${{ needs.version-bump.outputs.tag }}
+        prerelease: ${{ needs.version-bump.outputs.is_prerelease }}
+        files: dist/*.tar.gz
+        body: ${{ needs.version-bump.outputs.changelog }}
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

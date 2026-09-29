@@ -17,9 +17,11 @@ PROJECT="summon-keepass"
 REPO_NAME="desolat/summon-keepass"
 
 ARCH=`uname -m`
-if [ "${ARCH}" != "x86_64" ]; then
-  error "$PROJECT only available for 64-bit systems"
-fi
+case "$ARCH" in
+  x86_64) ARCH_SUFFIX="amd64" ;;
+  aarch64|arm64) ARCH_SUFFIX="arm64" ;;
+  *) error "$PROJECT is not available for architecture: ${ARCH}" ;;
+esac
 
 KERNEL_NAME=`uname | tr "[:upper:]" "[:lower:]"`
 
@@ -87,7 +89,7 @@ else
   check_version $VERSION
 fi
 
-FILE_NAME="$PROJECT-${KERNEL_NAME}-amd64.tar.gz"
+FILE_NAME="$PROJECT-${KERNEL_NAME}-${ARCH_SUFFIX}.tar.gz"
 URL="https://github.com/$REPO_NAME/releases/download/${VERSION}/$FILE_NAME"
 
 FILE_PATH="${tmp_dir}/$FILE_NAME"

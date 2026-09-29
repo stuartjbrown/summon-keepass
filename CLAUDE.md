@@ -35,12 +35,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 # Development build
 cargo build --verbose
 
-# Release build (optimized)
+# Release build (optimized, symbols stripped automatically via Cargo.toml's `[profile.release] strip = true`)
 cargo build --verbose --release
-
-# Release build with stripped symbols (production-ready)
-cargo build --verbose --release
-strip target/release/summon-keepass
 ```
 
 ### Testing
@@ -175,15 +171,10 @@ This project uses [cargo-release](https://github.com/crate-ci/cargo-release) to 
 **`.github/workflows/release.yml`** - Automated Release Creation (Recommended)
 - **Trigger:** Manual via GitHub UI ("Run workflow" button)
 - **Purpose:** Complete end-to-end release process
-- **Steps:**
-  1. Runs cargo-release (version bump, CHANGELOG update, tag creation)
-  2. Builds release binary with optimizations
-  3. Strips symbols for smaller binary size
-  4. Packages as `summon-keepass-linux-amd64.tar.gz`
-  5. Pushes commit and tag to repository
-  6. Extracts changelog from `CHANGELOG.md` for the release version
-  7. Creates GitHub Release with binary artifact
-  8. Automatically determines release vs pre-release based on version format
+- **Jobs:**
+  1. `version-bump`: Runs cargo-release (version bump, CHANGELOG update, tag creation), pushes commit and tag, extracts changelog for the release version
+  2. `build`: Matrix build for `linux-amd64` (native `cargo build`) and `linux-arm64` (cross-compiled via [`cross`](https://github.com/cross-rs/cross)). Symbols are stripped automatically via `strip = true` in `Cargo.toml`'s release profile. Packages each as `summon-keepass-linux-<arch>.tar.gz` and uploads as a build artifact
+  3. `publish`: Downloads both architecture artifacts and creates a single GitHub Release with both binaries attached, automatically determining release vs pre-release based on version format
 
 **`.github/workflows/rust.yml`** - Continuous Integration + Fallback
 - **Trigger:** Automatic on every push and pull request
@@ -219,10 +210,10 @@ There are two ways to create a release:
    - Update version in `Cargo.toml` and `CHANGELOG.md`
    - Create commit: "chore: release X.Y.Z"
    - Create tag `vX.Y.Z`
-   - Build the release binary
-   - Package it as `summon-keepass-linux-amd64.tar.gz`
    - Push commit and tag to GitHub
-   - Create GitHub Release with changelog and binary artifact
+   - Build release binaries for `linux-amd64` and `linux-arm64`
+   - Package them as `summon-keepass-linux-amd64.tar.gz` and `summon-keepass-linux-arm64.tar.gz`
+   - Create GitHub Release with changelog and both binary artifacts
    - Mark as pre-release if version contains `-alpha`, `-beta`, or `-rc`
 
 4. **Done!** The release is published at: https://github.com/desolat/summon-keepass/releases
@@ -404,7 +395,6 @@ When updating dependencies:
 - Updated Rust edition from 2021 → 2024
 
 **API Changes Required:**
-- Changed `keepass::NodeRef` import to `keepass::db::NodeRef` (module reorganization)
 - Updated `Database::open()` to use new `DatabaseKey` API:
   ```rust
   // Old API (0.4.9)
@@ -414,6 +404,7 @@ When updating dependencies:
   let key = DatabaseKey::new().with_password(password);
   Database::open(&mut file, key).map_err(...)?
   ```
+- Tree navigation no longer uses `keepass::db::NodeRef` (removed from the crate in >=0.8.17). Entries are now looked up with `db.root.group_by_path(&path_segments)` followed by `.entry_by_name(entry_name)`.
 
 **Testing:**
 - All 24 integration tests pass (17 original + 7 new configuration tests)

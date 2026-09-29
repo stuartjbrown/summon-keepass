@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Linux arm64 (aarch64) release binaries, built via cross-compilation alongside the existing amd64 build
+- `install.sh` now detects arm64/aarch64 systems and downloads the matching binary
+
+### Fixed
+- Updated `keepass` tree-navigation code to the current crate API (`group_by_path`/`entry_by_name`), fixing a build break caused by the removal of `NodeRef` and `Group::get` in keepass >=0.8.17
+- Release workflow's changelog extraction now uses a randomized `GITHUB_OUTPUT` heredoc delimiter instead of a fixed `EOF`, preventing corruption if a changelog entry ever contains a line that is literally "EOF"
+- Release workflow's `tag` job output is now read from the tag `cargo-release` actually created (`git describe --tags --exact-match`) instead of being reconstructed via string concatenation, avoiding drift if the tag-name template changes
+
+### Changed
+- Deduplicated the amd64/arm64 binary build matrix into a shared reusable workflow (`.github/workflows/build-release-binaries.yml`), used by both `release.yml` and `rust.yml`
+- Deduplicated changelog extraction into a shared composite action (`.github/actions/extract-changelog`), used by both `release.yml` and `rust.yml`
+- Upgraded remaining `actions/checkout@v2` steps in `rust.yml` to `@v4`
+- Simplified secret path parsing in `src/main.rs` to use `rsplit_once` instead of collecting into a `Vec` and popping the last element
+- Corrected CLAUDE.md's "API Changes Required" section, which still described the removed `keepass::db::NodeRef` API instead of the current `group_by_path`/`entry_by_name` navigation
+
 ## [0.4.0] - 2025-12-27
 
 ### Added

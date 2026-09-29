@@ -6,7 +6,7 @@ Simple [summon](https://cyberark.github.io/summon/) provider that allows usage o
 Installation
 -----
 
-Download the archive for your OS from the [latest release](../../releases), extract it and provide the executable to summon [as a provider](https://cyberark.github.io/summon/#providers).
+Download the archive for your OS/architecture from the [latest release](../../releases) (Linux amd64 and arm64 are supported), extract it and provide the executable to summon [as a provider](https://cyberark.github.io/summon/#providers).
 
 Alternatively there is an [install script](./install.sh) available.
 

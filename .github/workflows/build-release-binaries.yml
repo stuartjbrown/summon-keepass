@@ -1,0 +1,69 @@
+name: Build Release Binaries
+
+on:
+  workflow_call:
+    inputs:
+      ref:
+        description: 'Git ref to checkout for the build (defaults to the triggering ref)'
+        required: false
+        type: string
+        default: ''
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            arch: amd64
+            cross: false
+          - target: aarch64-unknown-linux-gnu
+            arch: arm64
+            cross: true
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        ref: ${{ inputs.ref }}
+
+    - name: Get package name
+      id: get-package
+      run: |
+        echo "package_name=$(cargo metadata --no-deps | jq -r .packages[0].name)" >> $GITHUB_OUTPUT
+
+    - name: Set up Rust
+      uses: actions-rust-lang/setup-rust-toolchain@v1
+      with:
+        toolchain: stable
+        cache-key: ${{ matrix.target }}
+
+    - name: Install cross
+      if: matrix.cross
+      uses: taiki-e/install-action@v2
+      with:
+        tool: cross
+
+    - name: Build binary
+      run: |
+        if [ "${{ matrix.cross }}" = "true" ]; then
+          cross build --verbose --release --target ${{ matrix.target }}
+        else
+          cargo build --verbose --release --target ${{ matrix.target }}
+        fi
+
+    - name: Package binary
+      run: |
+        PACKAGE_NAME="${{ steps.get-package.outputs.package_name }}"
+        TARGET_FILE="${PACKAGE_NAME}-linux-${{ matrix.arch }}.tar.gz"
+        mv "target/${{ matrix.target }}/release/${PACKAGE_NAME}" "${PACKAGE_NAME}"
+        tar -czvf "${TARGET_FILE}" "${PACKAGE_NAME}"
+
+    - name: Upload artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: release-binaries-${{ matrix.arch }}
+        path: ${{ steps.get-package.outputs.package_name }}-linux-${{ matrix.arch }}.tar.gz
+        if-no-files-found: error

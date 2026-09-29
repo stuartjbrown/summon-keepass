@@ -15,7 +15,7 @@ jobs:
 
     steps:
     - name: Checkout
-      uses: actions/checkout@v2
+      uses: actions/checkout@v4
 
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v2
@@ -35,35 +35,23 @@ jobs:
 
   build:
     needs: test
-    # Only run build/release steps when there's a tag
+    # Only run build steps when there's a tag
+    if: startsWith(github.ref, 'refs/tags/')
+    uses: ./.github/workflows/build-release-binaries.yml
+
+  publish:
+    needs: build
     if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
 
     steps:
     - name: Checkout
-      uses: actions/checkout@v2
-    - name: Get package name
-      run: |
-        echo "PACKAGE_NAME=$(cargo metadata --no-deps | jq -r .packages[0].name)" >> $GITHUB_ENV
-    - name: Set target file name
-      run: |
-        echo "TARGET_FILE_NAME=${PACKAGE_NAME}-linux-amd64.tar.gz" >> $GITHUB_ENV
-    - name: Build
-      # https://github.com/johnthagen/min-sized-rust#strip-symbols-from-binary
-      run: |
-        cargo build --verbose --release
-        strip target/release/${PACKAGE_NAME}
-        mv target/release/${PACKAGE_NAME} ${PACKAGE_NAME}
-
-    - name: Package
-      uses: thedoctor0/zip-release@master
-      with:
-        filename: ${{ env.TARGET_FILE_NAME }}
-        path: ${{ env.PACKAGE_NAME }}
-        type: tar
+      uses: actions/checkout@v4
 
     - name: Validate version consistency
-      if: startsWith(github.ref, 'refs/tags/')
+      id: version
       run: |
         TAG_VERSION=${GITHUB_REF#refs/tags/v}
         CARGO_VERSION=$(grep '^version = ' Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
@@ -75,6 +63,7 @@ jobs:
           exit 1
         fi
         echo "✅ Version consistency check passed"
+        echo "version=$TAG_VERSION" >> $GITHUB_OUTPUT
 
     - name: Check Tag
       id: check-tag
@@ -88,25 +77,24 @@ jobs:
 
     - name: Extract Changelog
       id: changelog
-      if: startsWith(github.ref, 'refs/tags/')
-      run: |
-        VERSION=${GITHUB_REF#refs/tags/v}
-        # Extract the section for this version from CHANGELOG.md
-        awk "BEGIN{p=0} /^## \[${VERSION}\]/{p=1; next} /^## \[/ && p{exit} p" CHANGELOG.md > /tmp/changelog.txt
-        # If empty, fall back to a default message
-        if [ ! -s /tmp/changelog.txt ]; then
-          echo "Release ${VERSION}" > /tmp/changelog.txt
-        fi
-        echo "changelog_file=/tmp/changelog.txt" >> $GITHUB_OUTPUT
-    
+      uses: ./.github/actions/extract-changelog
+      with:
+        version: ${{ steps.version.outputs.version }}
+
+    - name: Download artifacts
+      uses: actions/download-artifact@v4
+      with:
+        pattern: release-binaries-*
+        path: dist
+        merge-multiple: true
+
     - name: Prerelease
       uses: softprops/action-gh-release@v1
       if: steps.check-tag.outputs.prerelease == 'true'
       with:
         prerelease: true
-        files: |
-          ${{ env.TARGET_FILE_NAME }}
-        body_path: ${{ steps.changelog.outputs.changelog_file }}
+        files: dist/*.tar.gz
+        body: ${{ steps.changelog.outputs.changelog }}
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -114,8 +102,7 @@ jobs:
       uses: softprops/action-gh-release@v1
       if: steps.check-tag.outputs.release == 'true'
       with:
-        files: |
-          ${{ env.TARGET_FILE_NAME }}
-        body_path: ${{ steps.changelog.outputs.changelog_file }}
+        files: dist/*.tar.gz
+        body: ${{ steps.changelog.outputs.changelog }}
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

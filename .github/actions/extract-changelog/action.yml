@@ -1,0 +1,46 @@
+name: 'Extract changelog section'
+description: 'Extracts a version section (or falls back to Unreleased) from CHANGELOG.md'
+
+inputs:
+  version:
+    description: 'Version to extract (without the leading v)'
+    required: true
+
+outputs:
+  changelog:
+    description: 'Extracted changelog content'
+    value: ${{ steps.extract.outputs.changelog }}
+
+runs:
+  using: composite
+  steps:
+    - id: extract
+      shell: bash
+      run: |
+        VERSION="${{ inputs.version }}"
+        TMP_FILE="$(mktemp)"
+
+        # Extract the section for this version from CHANGELOG.md
+        awk "BEGIN{p=0} /^## \[${VERSION}\]/{p=1; next} /^## \[/ && p{exit} p" CHANGELOG.md > "$TMP_FILE"
+
+        # If empty (pre-releases won't have a section), fall back to [Unreleased]
+        if [ ! -s "$TMP_FILE" ]; then
+          echo "No section found for ${VERSION}, extracting [Unreleased] content..."
+          awk "BEGIN{p=0} /^## \[Unreleased\]/{p=1; next} /^## \[/ && p{exit} p" CHANGELOG.md > "$TMP_FILE"
+        fi
+
+        # If still empty, use a default message
+        if [ ! -s "$TMP_FILE" ]; then
+          echo "Release ${VERSION}" > "$TMP_FILE"
+        fi
+
+        # Use a randomized delimiter so a changelog line that is literally "EOF"
+        # can't prematurely terminate the multiline GITHUB_OUTPUT block.
+        delimiter="changelog_$(openssl rand -hex 8)"
+        {
+          echo "changelog<<${delimiter}"
+          cat "$TMP_FILE"
+          echo "${delimiter}"
+        } >> "$GITHUB_OUTPUT"
+
+        rm -f "$TMP_FILE"
